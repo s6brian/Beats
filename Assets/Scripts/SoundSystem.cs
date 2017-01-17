@@ -6,7 +6,7 @@ public class SoundSystem : SingletonBehaviour<SoundSystem>
 {
     [SerializeField] private AudioSource m_sourceBGM;
 
-    public delegate void SoundSystemAction();
+    public delegate void SoundSystemAction( double p_syncTime );
     public static event SoundSystemAction OnBGMPlay;
     public static event SoundSystemAction OnBGMStop;
 
@@ -14,11 +14,12 @@ public class SoundSystem : SingletonBehaviour<SoundSystem>
 
     public void OnClickPlay()
     {
-        m_sourceBGM.Play();
+        double initTime = AudioSettings.dspTime;
+        m_sourceBGM.PlayScheduled( initTime );
 
         if( OnBGMPlay != null )
         {
-            OnBGMPlay();
+            OnBGMPlay( initTime );
         }
     }
 
@@ -28,7 +29,7 @@ public class SoundSystem : SingletonBehaviour<SoundSystem>
 
         if( OnBGMStop != null )
         {
-            OnBGMStop();
+            OnBGMStop( 0 );
         }
     }
 }
