@@ -16,11 +16,11 @@ public class Player : MonoBehaviour
 
     protected void Update()
     {
-        Vector3 pos = m_transform.position;
+        Vector3 pos = m_transform.localScale;// position;
 
         if(( m_beatListener.BeatMask & ( BeatType.DownBeat | BeatType.UpBeat | BeatType.OffBeat )) > 0 )//== BeatType.DownBeat )
         {
-            pos.y = 2f;
+            pos.y = 4f;
         }
 
 //        if(( m_beatListener.BeatMask & BeatType.UpBeat ) == BeatType.UpBeat )
@@ -29,16 +29,16 @@ public class Player : MonoBehaviour
 //            m_transform.position = pos;
 //        }
 
-        if( pos.y > 0 )
+        if( pos.y > 1 )
         {
             pos.y -= 0.1f;
         }
 
-        if( pos.y < 0 )
+        if( pos.y < 1 )
         {
-            pos.y = 0;
+            pos.y = 1;
         }
 
-        m_transform.position = pos;
+        m_transform.localScale = pos;//position = pos;
     }
 }
