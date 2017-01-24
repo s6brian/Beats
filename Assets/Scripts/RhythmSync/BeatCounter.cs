@@ -8,9 +8,6 @@ public class BeatCounter : MonoBehaviour
     [SerializeField] private BeatValue m_beatValue = BeatValue.QuarterBeat;
     [SerializeField] private BeatType m_beatType = BeatType.OnBeat;
 
-    [ Range( 0f, 500f )]
-    [SerializeField] private float m_fLoopTime = 30.0f;
-
     [Space]
     [SerializeField] private BeatListener[] m_arrayBeatListeners;
 
@@ -21,9 +18,9 @@ public class BeatCounter : MonoBehaviour
     private float m_fCurrentSample;
 
     private float[]  m_samples          = new float[1024];
-    private float[]  m_subBands         = new float[32];
-    private float[,] m_eHistory         = new float[32, 43]; // each sub band has 43 energy history
-    private float[]  m_aveSoundEnergies = new float[32];
+    private float[]  m_subBands         = new float[64];
+    private float[,] m_eHistory         = new float[64, 43];// each sub band has 43 energy history
+    private float[]  m_aveSoundEnergies = new float[64];
 
     public delegate void BeatCounterDelegate( BeatType p_beatType );
     public static event BeatCounterDelegate OnBeatNotify;
@@ -44,50 +41,60 @@ public class BeatCounter : MonoBehaviour
         m_fNextBeatSample   = 0.0f;
         m_fSamplePeriod     = 0.0f;
         m_fCurrentSample    = 0.0f;
-
-        /*
-        float audioBpm = audioSource.GetComponent<BeatSynchronizer>().bpm;
-        samplePeriod = (60f / (audioBpm * BeatDecimalValues.values[(int)beatValue])) * audioSource.clip.frequency;
-
-        if (beatOffset != BeatValue.None) {
-            sampleOffset = (60f / (audioBpm * BeatDecimalValues.values[(int)beatOffset])) * audioSource.clip.frequency;
-            if (negativeBeatOffset) {
-                sampleOffset = samplePeriod - sampleOffset;
-            }
-        }
-
-        samplePeriod *= beatScalar;
-        sampleOffset *= beatScalar;
-        nextBeatSample = 0f;
-        */
     }
 
     private void OnBGMPlay( double p_syncTime )
     {
         AudioClip currentClip = m_sourceBGM.clip;
-
         m_fNextBeatSample = ( float )p_syncTime * currentClip.frequency;
-//        m_fSamplePeriod   = ( 60f / ( 120f * BeatDecimalValues.values[( int )m_beatValue ])) * m_sourceBGM.clip.frequency;
-
-//        StartCoroutine( "BeatCheck" );
         StartCoroutine( "BeatDetection" );
     }
 
     private void GetSubBands()
     {
-        int subBandsLen = m_subBands.Length;
-        int samplesLen = m_samples.Length;
-        float averageMult = ( float )subBandsLen / ( float )samplesLen;
+        /***********************************************************************************************
+            size = ( n * b ) + ( a * (( n * ( n + 1 )) / 2 ))
+            1024 = 64 b + ( a * ((64 * ( 64 + 1 )) / 2 ))
+            1024 = 64 b + 2080 a
+            --
+            let C = .45
 
-        for( int idx = 0; idx < subBandsLen; ++idx )
+            1024 = 64 b + 2080 (.45)
+            1024 - 936 = 64 b
+            88 = 64b
+            b = 1.375
+
+            1024 = 64 (.45) + 2080 a
+            1024 - 28.8 = 2080 a
+            995.2 = 2080 a
+            a = 0.4785
+            --
+            see: http://archive.gamedev.net/archive/reference/programming/features/beatdetection/
+                 formula R12 for getting 'a' and 'b' 
+                 that are needed in formula R10 to get wi {( a * i ) + b } or subBandsLen
+        ***********************************************************************************************/
+
+        int samplesCount  = m_samples.Length;
+        int subBandsCount = m_subBands.Length;
+        int subBandsMax   = 0;
+        int subBandsMin   = 0;
+        float averageMult = 0f;
+
+        for( int idx = 0; idx < subBandsCount; ++idx )
         {
             m_subBands[idx] = 0;
 
-            for( int jdx = idx * subBandsLen; jdx < ( idx + 1 ) * subBandsLen ; ++jdx )
-            {
-                m_subBands[idx] += m_samples[jdx] * m_samples[jdx];
-            }
+            subBandsMin  = subBandsMax;
+            subBandsMax  = Mathf.RoundToInt( 0.4785f * idx + 1.375f ); //=> wi = a * i + b
+            averageMult  = ( float )subBandsMax / ( float )samplesCount;
+            subBandsMax += subBandsMin;
 
+            for( int jdx = subBandsMin; jdx < subBandsMax; ++jdx )
+            {
+                // if jdx is greater than samples count, loop back to 1st sample
+                m_subBands[idx] += m_samples[jdx % samplesCount] * m_samples[jdx % samplesCount];
+            }
+            
             m_subBands[idx] *= averageMult;
         }
     }
@@ -99,6 +106,7 @@ public class BeatCounter : MonoBehaviour
         float averageSoundEnergy = 0f;
         int seHistRow = m_eHistory.GetLength( 0 );
         int seHistCol = m_eHistory.GetLength( 1 ) - p_emptyHistoryBufferCount;
+        float averageMult = 1f / seHistCol;
 
         for( int idx = 0; idx < seHistRow; ++idx )
         {
@@ -116,7 +124,7 @@ public class BeatCounter : MonoBehaviour
             m_aveSoundEnergies[idx   ] += m_subBands[idx];
 
             // get current average sound energy of the given subband
-            m_aveSoundEnergies[idx] /= seHistCol;
+            m_aveSoundEnergies[idx] *= averageMult;
         }
     }
 
@@ -126,6 +134,7 @@ public class BeatCounter : MonoBehaviour
         // used to determine how many previous sound energy was cached
         int emptyHistoryBufferCount = m_eHistory.GetLength( 1 );
         int subBandsLen = m_subBands.Length;
+        float loopTime = 1f / ( float )emptyHistoryBufferCount;
 
         while( m_sourceBGM.isPlaying )
         {
@@ -138,7 +147,6 @@ public class BeatCounter : MonoBehaviour
 //            {
 //                beatCount += ( m_subBands[idx] > 1.5f * m_aveSoundEnergies[idx] ) ? 1: 0;
 //            }
-
 //            Debug.Log( "beat count: <b>" + beatCount + "</b>" );
 
 //            if( beatCount > subBandsLen * 0.0f )
@@ -150,34 +158,32 @@ public class BeatCounter : MonoBehaviour
                 }
             }
 
-//            yield return new WaitForSeconds( 1 );
-            yield return new WaitForSeconds( 0.0233f ); // 1/43
-            //yield return new WaitForSeconds( m_fLoopTime * 0.001f );
+            yield return new WaitForSeconds( loopTime );
         }
     }
 
-    private IEnumerator BeatCheck()
-    {
-        while( m_sourceBGM.isPlaying )
-        {
-            m_fCurrentSample = ( float )AudioSettings.dspTime * m_sourceBGM.clip.frequency;
-
-            if( m_fCurrentSample >= m_fNextBeatSample )
-            {
-                Debug.Log( "<b>curr sample: " + m_fCurrentSample + ", next sample: " + m_fNextBeatSample + "</b>" );
-
-                foreach( BeatListener beatListener in m_arrayBeatListeners )
-                {
-                    beatListener.Notify( m_beatType );
-                }
-                m_fNextBeatSample += m_fSamplePeriod;
-            }
-            else
-            {
-                Debug.Log( "curr sample: " + m_fCurrentSample + ", next sample: " + m_fNextBeatSample );
-            }
-            
-            yield return new WaitForSeconds( m_fLoopTime * 0.001f );
-        }
-    }
+//    private IEnumerator BeatCheck()
+//    {
+//        while( m_sourceBGM.isPlaying )
+//        {
+//            m_fCurrentSample = ( float )AudioSettings.dspTime * m_sourceBGM.clip.frequency;
+//
+//            if( m_fCurrentSample >= m_fNextBeatSample )
+//            {
+//                Debug.Log( "<b>curr sample: " + m_fCurrentSample + ", next sample: " + m_fNextBeatSample + "</b>" );
+//
+//                foreach( BeatListener beatListener in m_arrayBeatListeners )
+//                {
+//                    beatListener.Notify( m_beatType );
+//                }
+//                m_fNextBeatSample += m_fSamplePeriod;
+//            }
+//            else
+//            {
+//                Debug.Log( "curr sample: " + m_fCurrentSample + ", next sample: " + m_fNextBeatSample );
+//            }
+//            
+//            yield return new WaitForSeconds( m_fLoopTime * 0.001f );
+//        }
+//    }
 }
