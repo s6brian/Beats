@@ -5,6 +5,7 @@
  */
 
 using System.Collections;
+using System.Collections.Generic;
 
 namespace SynchronizerData
 {
@@ -54,4 +55,31 @@ namespace SynchronizerData
 		};
 	}
 
+    // see: http://www.teachmeaudio.com/mixing/techniques/audio-spectrum
+    public enum FrequencyRange
+    {
+        None       = 0,
+        All        = ~0,
+        SBass      = 1 << 0, // 20  - 60  Hz
+        Bass       = 1 << 1, // 60  - 250 Hz
+        LoMid      = 1 << 2, // 250 - 500 Hz
+        Mid        = 1 << 3, // 0.5 - 2   kHz
+        HiMid      = 1 << 4, // 2   - 4   kHz
+        Pressence  = 1 << 5, // 4   - 6   kHz
+        Brilliance = 1 << 6  // 6   - 20  kHz
+    }
+
+public struct FrequencyRangeValues
+{
+    public static Dictionary<FrequencyRange, float[]> values = new Dictionary<FrequencyRange, float[]>()
+    {
+        { FrequencyRange.SBass,      new float[]{   20f,    60f }},
+        { FrequencyRange.Bass,       new float[]{   60f,   250f }},
+        { FrequencyRange.LoMid,      new float[]{  250f,   500f }},
+        { FrequencyRange.Mid,        new float[]{  500f,  2000f }},
+        { FrequencyRange.HiMid,      new float[]{ 2000f,  4000f }},
+        { FrequencyRange.Pressence,  new float[]{ 4000f,  6000f }},
+        { FrequencyRange.Brilliance, new float[]{ 6000f, 20000f }}
+    };
+}
 }

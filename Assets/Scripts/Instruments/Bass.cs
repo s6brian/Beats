@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using SynchronizerData;
 
-public class Player : MonoBehaviour
+public class Bass : MonoBehaviour
 {
     [SerializeField] private BeatListener m_beatListener;
 
@@ -12,12 +12,12 @@ public class Player : MonoBehaviour
     protected void OnEnable()
     {
         // set functions relatie to frequencies you want this object to listen to
-        BeatCounter.OnMidRangeNotify += m_beatListener.OnMidRangeNotify;
+        BeatCounter.OnBassNotify += m_beatListener.OnBassNotify;
     }
 
     protected void OnDisable()
     {
-        BeatCounter.OnMidRangeNotify -= m_beatListener.OnMidRangeNotify;
+        BeatCounter.OnBassNotify -= m_beatListener.OnBassNotify;
     }
 
     protected void Start()
@@ -29,7 +29,7 @@ public class Player : MonoBehaviour
     {
         Vector3 scale = m_transform.localScale;
 
-        if(( m_beatListener.FeRangeMask & FrequencyRange.Mid ) == FrequencyRange.Mid )
+        if(( m_beatListener.FeRangeMask & FrequencyRange.Bass ) == FrequencyRange.Bass )
         {
             scale.y = 4f;
         }

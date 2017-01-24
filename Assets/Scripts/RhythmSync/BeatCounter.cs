@@ -5,25 +5,31 @@ using SynchronizerData;
 
 public class BeatCounter : MonoBehaviour
 {
-    [SerializeField] private BeatValue m_beatValue = BeatValue.QuarterBeat;
-    [SerializeField] private BeatType m_beatType = BeatType.OnBeat;
-
-    [Space]
-    [SerializeField] private BeatListener[] m_arrayBeatListeners;
-
     private AudioSource m_sourceBGM;
+    private float m_fFeMultiplier;
 
-    private float m_fNextBeatSample;
-    private float m_fSamplePeriod;
-    private float m_fCurrentSample;
+    private const int SAMPLE_COUNT   = 1024;
+    private const int SUBBAND_COUNT  = 64;
+    private const int HISTORY_BUFFER = 43;
 
-    private float[]  m_samples          = new float[1024];
-    private float[]  m_subBands         = new float[64];
-    private float[,] m_eHistory         = new float[64, 43];// each sub band has 43 energy history
-    private float[]  m_aveSoundEnergies = new float[64];
+    private float[] m_samples          = new float[SAMPLE_COUNT ];
+    private float[] m_subBands         = new float[SUBBAND_COUNT];
+    private float[] m_aveSoundEnergies = new float[SUBBAND_COUNT];
+    private float[] m_aveVariance      = new float[SUBBAND_COUNT];
+
+    private float[,] m_eHistory = new float[SUBBAND_COUNT, HISTORY_BUFFER];
 
     public delegate void BeatCounterDelegate( BeatType p_beatType );
     public static event BeatCounterDelegate OnBeatNotify;
+
+    public delegate void  FrequencyDelegate ();
+    public static   event FrequencyDelegate OnSubBassNotify;
+    public static   event FrequencyDelegate OnBassNotify;
+    public static   event FrequencyDelegate OnLowMidNotify;
+    public static   event FrequencyDelegate OnMidRangeNotify;
+    public static   event FrequencyDelegate OnHighMidNotify;
+    public static   event FrequencyDelegate OnPressenceNotify;
+    public static   event FrequencyDelegate OnBrillianceNotify;
 
     protected void OnEnable()
     {
@@ -38,15 +44,11 @@ public class BeatCounter : MonoBehaviour
     protected void Start()
     {
         m_sourceBGM = SoundSystem.Instance.SourceBGM;
-        m_fNextBeatSample   = 0.0f;
-        m_fSamplePeriod     = 0.0f;
-        m_fCurrentSample    = 0.0f;
     }
 
     private void OnBGMPlay( double p_syncTime )
     {
-        AudioClip currentClip = m_sourceBGM.clip;
-        m_fNextBeatSample = ( float )p_syncTime * currentClip.frequency;
+        m_fFeMultiplier = ( float )SAMPLE_COUNT / ( float )m_sourceBGM.clip.frequency;
         StartCoroutine( "BeatDetection" );
     }
 
@@ -74,25 +76,23 @@ public class BeatCounter : MonoBehaviour
                  that are needed in formula R10 to get wi {( a * i ) + b } or subBandsLen
         ***********************************************************************************************/
 
-        int samplesCount  = m_samples.Length;
-        int subBandsCount = m_subBands.Length;
         int subBandsMax   = 0;
         int subBandsMin   = 0;
         float averageMult = 0f;
 
-        for( int idx = 0; idx < subBandsCount; ++idx )
+        for( int idx = 0; idx < SUBBAND_COUNT; ++idx )
         {
             m_subBands[idx] = 0;
 
             subBandsMin  = subBandsMax;
             subBandsMax  = Mathf.RoundToInt( 0.4785f * idx + 1.375f ); //=> wi = a * i + b
-            averageMult  = ( float )subBandsMax / ( float )samplesCount;
+            averageMult  = ( float )subBandsMax / ( float )SAMPLE_COUNT;
             subBandsMax += subBandsMin;
 
             for( int jdx = subBandsMin; jdx < subBandsMax; ++jdx )
             {
                 // if jdx is greater than samples count, loop back to 1st sample
-                m_subBands[idx] += m_samples[jdx % samplesCount] * m_samples[jdx % samplesCount];
+                m_subBands[idx] += m_samples[jdx % SAMPLE_COUNT] * m_samples[jdx % SAMPLE_COUNT];
             }
             
             m_subBands[idx] *= averageMult;
@@ -104,11 +104,10 @@ public class BeatCounter : MonoBehaviour
         p_emptyHistoryBufferCount = Mathf.Max( 0, p_emptyHistoryBufferCount );
 
         float averageSoundEnergy = 0f;
-        int seHistRow = m_eHistory.GetLength( 0 );
-        int seHistCol = m_eHistory.GetLength( 1 ) - p_emptyHistoryBufferCount;
+        int seHistCol = HISTORY_BUFFER - p_emptyHistoryBufferCount;
         float averageMult = 1f / seHistCol;
 
-        for( int idx = 0; idx < seHistRow; ++idx )
+        for( int idx = 0; idx < SUBBAND_COUNT; ++idx )
         {
             m_aveSoundEnergies[idx] = 0;
 
@@ -125,65 +124,112 @@ public class BeatCounter : MonoBehaviour
 
             // get current average sound energy of the given subband
             m_aveSoundEnergies[idx] *= averageMult;
+
+            // get sound energy average variance
+//            for( int jdx = seHistCol - 1; jdx >= 0; --jdx )
+//            {
+//                float v = m_eHistory[idx, jdx] - m_aveSoundEnergies[idx];
+//                m_aveVariance[idx] += v * v;
+//            }
+//
+//            m_aveVariance[idx] *= averageMult;
         }
+    }
+
+    private bool BeatDetected( FrequencyRange p_feRange )
+    {
+        int minIdx = ( int )( FrequencyRangeValues.values[p_feRange][0] * m_fFeMultiplier );
+        int maxIdx = ( int )( FrequencyRangeValues.values[p_feRange][1] * m_fFeMultiplier );
+
+//        Debug.Log( "\nlisten to: " + p_feRange + ", minIdx: " + minIdx + ", maxIdx: " + maxIdx );
+//        Debug.Log( "min frequency: " + FrequencyRangeValues.values[p_feRange][0] + ", max frequency: " + FrequencyRangeValues.values[p_feRange][1] + "\n" );
+
+        float subbandAve = 0;
+        float volumeAve = 0;
+
+        for( int idx = minIdx; idx < maxIdx; ++idx )
+        {
+//            subbandAve += m_subBands[idx];
+//            volumeAve  += m_aveSoundEnergies[idx];
+            subbandAve += m_samples[idx];
+        }
+
+        subbandAve /= maxIdx - minIdx;
+//        volumeAve  /= maxIdx - minIdx;
+//
+//        return( subbandAve > 1.5f * volumeAve );
+
+//        Debug.Log( "vol: " + subbandAve );
+        return subbandAve > 1E-3f;
     }
 
     // source: http://archive.gamedev.net/archive/reference/programming/features/beatdetection/
     private IEnumerator BeatDetection()
     {
         // used to determine how many previous sound energy was cached
-        int emptyHistoryBufferCount = m_eHistory.GetLength( 1 );
+        int emptyHistoryBufferCount = HISTORY_BUFFER;
         int subBandsLen = m_subBands.Length;
         float loopTime = 1f / ( float )emptyHistoryBufferCount;
 
         while( m_sourceBGM.isPlaying )
         {
             int beatCount = 0;
-            m_sourceBGM.GetSpectrumData( m_samples, 0, FFTWindow.Rectangular );
-            GetSubBands();
-            GetAverageSoundEnergy( --emptyHistoryBufferCount );
+            m_sourceBGM.GetSpectrumData( m_samples, 0, FFTWindow.BlackmanHarris );
+//            GetSubBands();
+//            GetAverageSoundEnergy( --emptyHistoryBufferCount );
 
-//            for( int idx = 0; idx < subBandsLen; ++idx )
-//            {
-//                beatCount += ( m_subBands[idx] > 1.5f * m_aveSoundEnergies[idx] ) ? 1: 0;
-//            }
-//            Debug.Log( "beat count: <b>" + beatCount + "</b>" );
+            /******************************************************************
+                see: http://archive.gamedev.net/archive/reference/programming/features/beatdetection/
+                     formula R13
+                     
+                f = ( i * fe ) / N
+                f * N = i * fe
+                i = f * ( N / fe ) => round off to get index
+            ******************************************************************/
 
-//            if( beatCount > subBandsLen * 0.0f )
-            if( m_subBands[0] > 1.5f * m_aveSoundEnergies[0] )
+            if(    OnSubBassNotify != null
+                && BeatDetected( FrequencyRange.SBass ))
             {
-                foreach( BeatListener beatListener in m_arrayBeatListeners )
-                {
-                    beatListener.Notify( m_beatType );
-                }
+                OnSubBassNotify();
+            }
+
+            if(    OnBassNotify != null
+                && BeatDetected( FrequencyRange.Bass ))
+            {
+                OnBassNotify();
+            }
+
+            if(    OnLowMidNotify != null
+                && BeatDetected( FrequencyRange.LoMid ))
+            {
+                OnLowMidNotify();
+            }
+
+            if(    OnMidRangeNotify != null
+                && BeatDetected( FrequencyRange.Mid ))
+            {
+                OnMidRangeNotify();
+            }
+
+            if(    OnHighMidNotify != null 
+                && BeatDetected( FrequencyRange.HiMid ))
+            {
+                OnHighMidNotify();
+            }
+
+            if(    OnPressenceNotify != null 
+                && BeatDetected( FrequencyRange.Pressence ))
+            {
+                OnPressenceNotify();
+            }
+
+            if(    OnBrillianceNotify != null 
+                && BeatDetected( FrequencyRange.Brilliance ))
+            {
+                OnBrillianceNotify();
             }
 
             yield return new WaitForSeconds( loopTime );
         }
     }
-
-//    private IEnumerator BeatCheck()
-//    {
-//        while( m_sourceBGM.isPlaying )
-//        {
-//            m_fCurrentSample = ( float )AudioSettings.dspTime * m_sourceBGM.clip.frequency;
-//
-//            if( m_fCurrentSample >= m_fNextBeatSample )
-//            {
-//                Debug.Log( "<b>curr sample: " + m_fCurrentSample + ", next sample: " + m_fNextBeatSample + "</b>" );
-//
-//                foreach( BeatListener beatListener in m_arrayBeatListeners )
-//                {
-//                    beatListener.Notify( m_beatType );
-//                }
-//                m_fNextBeatSample += m_fSamplePeriod;
-//            }
-//            else
-//            {
-//                Debug.Log( "curr sample: " + m_fCurrentSample + ", next sample: " + m_fNextBeatSample );
-//            }
-//            
-//            yield return new WaitForSeconds( m_fLoopTime * 0.001f );
-//        }
-//    }
 }
